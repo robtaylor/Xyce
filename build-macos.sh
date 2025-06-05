@@ -2,17 +2,24 @@ ROOT=$(pwd)
 
 brew install openblas cmake lapack bison flex fftw suitesparse autogen open-mpi
 export PKG_CONFIG_PATH="$HOMEBREW_PREFIX/opt/lapack/lib/pkgconfig"
-export PATH="$HOMEBREW_PREFIX/opt/bison/bin:HOMEBREW_PREFIX/opt/flex/bin:$PATH"
-export LDFLAGS="-L$HOMEBREW_PREXIX/opt/bison/lib -L$HOMEBREW_PREFIX/opt/flex/lib"
-export CPPFLAGS="-I$HOMEBREW_PREXIX/opt/bison/include -I$HOMEBREW_PREFIX/opt/flex/include"
-export LDFLAGS="-L/opt/homebrew/opt/libomp/lib $LDFLAGS"
-export CPPFLAGS="-I/opt/homebrew/opt/libomp/include $CPPFLAGS"
+export PATH="$HOMEBREW_PREFIX/opt/bison/bin:$HOMEBREW_PREFIX/opt/flex/bin:$PATH"
+export LDFLAGS="-L$HOMEBREW_PREFIX/opt/bison/lib -L$HOMEBREW_PREFIX/opt/flex/lib"
+export CPPFLAGS="-I$HOMEBREW_PREFIX/opt/bison/include -I$HOMEBREW_PREFIX/opt/flex/include"
+export LDFLAGS="-L$HOMEBREW_PREFIX/opt/libomp/lib -L$HOMEBREW_PREFIX/lib $LDFLAGS"
+export CPPFLAGS="-I/$HOMEBREW_PREFIX/opt/libomp/include -I$HOMEBREW_PREFIX/include/suitesparse -I$HOMEBREW_PREFIX/include $CPPFLAGS"
 export CFLAGS="-O3 -fPIC"
-export CXXFLAGS="-O3 -fPIC"
+export CXXFLAGS="-O3 -fPIC -std=c++17"
+
+export LEX=$HOMEBREW_PREFIX/opt/flex/bin/flex
+export BISON=$HOMEBREW_PREFIX/opt/bison/bin/bison
+export CXX=mpicxx
+export CC=mpicc
+export F77=mpif77
+
 export ARCHDIR=$ROOT/_build/libs
 
 mkdir -p _build/trilinos
-mkdir -p _build/libs
+mkdir -p _build/install
 
 
 cmake \
@@ -57,6 +64,25 @@ cmake \
 -S $ROOT/vendor/trilinos \
 -B $ROOT/_build/trilinos
 
-make -C _build/trilinos
+NCPUS=$(sysctl -n hw.logicalcpu)
+make -C _build/trilinos -j $NCPUS
 make -C _build/trilinos install
 
+mkdir -p $ROOT/_build/xyce
+
+export LDFLAGS="-L$ARCHDIR/lib -Wl,-framework,Accelerate $LDFLAGS"
+export CPPFLAGS="-I$ARCHDIR/include $CPPFLAGS"
+
+TRILINOS_LIBS=$(ls _build/libs/lib/*.a | xargs basename | sed -e 's/lib/-l/' -e 's/\.a//' | tr '\n' ' ')
+
+cd $ROOT/_build/xyce && \
+$ROOT/configure \
+--enable-mpi \
+--enable-stokhos \
+--enable-amesos2 \
+LIBS="$TRILINOS_LIBS" \
+--prefix=$ROOT/_install
+
+cd $ROOT
+make -C _build/xyce -j $((NCPUS/2)) 2>&1 | tee _build/xyce-build.log
+make -C _build/xyce install 2>&1 | tee _build/xyce-install.log
